@@ -20,9 +20,11 @@
 
 import pandas as _pd
 import numpy as _np
+from math import sqrt as _sqrt, ceil as _ceil
 from datetime import (
     datetime as _dt, timedelta as _td
 )
+from base64 import b64encode as _b64encode
 import re as _regex
 from tabulate import tabulate as _tabulate
 from . import (
@@ -38,15 +40,23 @@ except ImportError:
     pass
 
 
-def html(returns, benchmark=None, rf=0.,
-         grayscale=False, title='Strategy Tearsheet',
-         output=None, compounded=True):
+def _get_trading_periods(trading_year_days=252):
+    half_year = _ceil(trading_year_days/2)
+    return trading_year_days, half_year
+
+
+def html(returns, benchmark=None, rf=0., grayscale=False,
+         title='Strategy Tearsheet', output=None, compounded=True,
+         trading_year_days=252, download_filename='quantstats-tearsheet.html',
+         figfmt='svg', template_path=None):
+
+    win_year, win_half_year = _get_trading_periods(trading_year_days)
 
     if output is None and not _utils._in_notebook():
         raise ValueError("`file` must be specified")
 
     tpl = ""
-    with open(__file__[:-4] + '.html') as f:
+    with open(template_path or __file__[:-4] + '.html') as f:
         tpl = f.read()
         f.close()
 
@@ -98,109 +108,113 @@ def html(returns, benchmark=None, rf=0.,
     figfile = _utils._file_stream()
     _plots.returns(returns, benchmark, grayscale=grayscale,
                    figsize=(8, 5), subtitle=False,
-                   savefig={'fname': figfile, 'format': 'svg'},
+                   savefig={'fname': figfile, 'format': figfmt},
                    show=False, ylabel=False, cumulative=compounded)
-    tpl = tpl.replace('{{returns}}', figfile.getvalue().decode())
+    tpl = tpl.replace('{{returns}}', _embed_figure(figfile, figfmt))
 
     figfile = _utils._file_stream()
     _plots.log_returns(returns, benchmark, grayscale=grayscale,
                        figsize=(8, 4), subtitle=False,
-                       savefig={'fname': figfile, 'format': 'svg'},
+                       savefig={'fname': figfile, 'format': figfmt},
                        show=False, ylabel=False, cumulative=compounded)
-    tpl = tpl.replace('{{log_returns}}', figfile.getvalue().decode())
+    tpl = tpl.replace('{{log_returns}}', _embed_figure(figfile, figfmt))
 
     if benchmark is not None:
         figfile = _utils._file_stream()
         _plots.returns(returns, benchmark, match_volatility=True,
                        grayscale=grayscale, figsize=(8, 4), subtitle=False,
-                       savefig={'fname': figfile, 'format': 'svg'},
+                       savefig={'fname': figfile, 'format': figfmt},
                        show=False, ylabel=False, cumulative=compounded)
-        tpl = tpl.replace('{{vol_returns}}', figfile.getvalue().decode())
+        tpl = tpl.replace('{{vol_returns}}', _embed_figure(figfile, figfmt))
 
     figfile = _utils._file_stream()
     _plots.yearly_returns(returns, benchmark, grayscale=grayscale,
                           figsize=(8, 4), subtitle=False,
-                          savefig={'fname': figfile, 'format': 'svg'},
+                          savefig={'fname': figfile, 'format': figfmt},
                           show=False, ylabel=False, compounded=compounded)
-    tpl = tpl.replace('{{eoy_returns}}', figfile.getvalue().decode())
+    tpl = tpl.replace('{{eoy_returns}}', _embed_figure(figfile, figfmt))
 
     figfile = _utils._file_stream()
     _plots.histogram(returns, grayscale=grayscale,
                      figsize=(8, 4), subtitle=False,
-                     savefig={'fname': figfile, 'format': 'svg'},
+                     savefig={'fname': figfile, 'format': figfmt},
                      show=False, ylabel=False, compounded=compounded)
-    tpl = tpl.replace('{{monthly_dist}}', figfile.getvalue().decode())
+    tpl = tpl.replace('{{monthly_dist}}', _embed_figure(figfile, figfmt))
 
     figfile = _utils._file_stream()
     _plots.daily_returns(returns, grayscale=grayscale,
                          figsize=(8, 3), subtitle=False,
-                         savefig={'fname': figfile, 'format': 'svg'},
+                         savefig={'fname': figfile, 'format': figfmt},
                          show=False, ylabel=False)
-    tpl = tpl.replace('{{daily_returns}}', figfile.getvalue().decode())
+    tpl = tpl.replace('{{daily_returns}}', _embed_figure(figfile, figfmt))
 
     if benchmark is not None:
         figfile = _utils._file_stream()
         _plots.rolling_beta(returns, benchmark, grayscale=grayscale,
                             figsize=(8, 3), subtitle=False,
-                            savefig={'fname': figfile, 'format': 'svg'},
+                            window1=win_year, window2=win_half_year,
+                            savefig={'fname': figfile, 'format': figfmt},
                             show=False, ylabel=False)
-        tpl = tpl.replace('{{rolling_beta}}', figfile.getvalue().decode())
+        tpl = tpl.replace('{{rolling_beta}}', _embed_figure(figfile, figfmt))
 
     figfile = _utils._file_stream()
     _plots.rolling_volatility(returns, benchmark, grayscale=grayscale,
                               figsize=(8, 3), subtitle=False,
-                              savefig={'fname': figfile, 'format': 'svg'},
-                              show=False, ylabel=False)
-    tpl = tpl.replace('{{rolling_vol}}', figfile.getvalue().decode())
+                              savefig={'fname': figfile, 'format': figfmt},
+                              show=False, ylabel=False, period=win_half_year,
+                              trading_year_days=win_year)
+    tpl = tpl.replace('{{rolling_vol}}', _embed_figure(figfile, figfmt))
 
     figfile = _utils._file_stream()
     _plots.rolling_sharpe(returns, grayscale=grayscale,
                           figsize=(8, 3), subtitle=False,
-                          savefig={'fname': figfile, 'format': 'svg'},
-                          show=False, ylabel=False)
-    tpl = tpl.replace('{{rolling_sharpe}}', figfile.getvalue().decode())
+                          savefig={'fname': figfile, 'format': figfmt},
+                          show=False, ylabel=False, period=win_half_year,
+                          trading_year_days=win_year)
+    tpl = tpl.replace('{{rolling_sharpe}}', _embed_figure(figfile, figfmt))
 
     figfile = _utils._file_stream()
     _plots.rolling_sortino(returns, grayscale=grayscale,
                            figsize=(8, 3), subtitle=False,
-                           savefig={'fname': figfile, 'format': 'svg'},
-                           show=False, ylabel=False)
-    tpl = tpl.replace('{{rolling_sortino}}', figfile.getvalue().decode())
+                           savefig={'fname': figfile, 'format': figfmt},
+                           show=False, ylabel=False, period=win_half_year,
+                           trading_year_days=win_year)
+    tpl = tpl.replace('{{rolling_sortino}}', _embed_figure(figfile, figfmt))
 
     figfile = _utils._file_stream()
     _plots.drawdowns_periods(returns, grayscale=grayscale,
                              figsize=(8, 4), subtitle=False,
-                             savefig={'fname': figfile, 'format': 'svg'},
+                             savefig={'fname': figfile, 'format': figfmt},
                              show=False, ylabel=False, compounded=compounded)
-    tpl = tpl.replace('{{dd_periods}}', figfile.getvalue().decode())
+    tpl = tpl.replace('{{dd_periods}}', _embed_figure(figfile, figfmt))
 
     figfile = _utils._file_stream()
     _plots.drawdown(returns, grayscale=grayscale,
                     figsize=(8, 3), subtitle=False,
-                    savefig={'fname': figfile, 'format': 'svg'},
+                    savefig={'fname': figfile, 'format': figfmt},
                     show=False, ylabel=False)
-    tpl = tpl.replace('{{dd_plot}}', figfile.getvalue().decode())
+    tpl = tpl.replace('{{dd_plot}}', _embed_figure(figfile, figfmt))
 
     figfile = _utils._file_stream()
     _plots.monthly_heatmap(returns, grayscale=grayscale,
                            figsize=(8, 4), cbar=False,
-                           savefig={'fname': figfile, 'format': 'svg'},
+                           savefig={'fname': figfile, 'format': figfmt},
                            show=False, ylabel=False, compounded=compounded)
-    tpl = tpl.replace('{{monthly_heatmap}}', figfile.getvalue().decode())
+    tpl = tpl.replace('{{monthly_heatmap}}', _embed_figure(figfile, figfmt))
 
     figfile = _utils._file_stream()
     _plots.distribution(returns, grayscale=grayscale,
                         figsize=(8, 4), subtitle=False,
-                        savefig={'fname': figfile, 'format': 'svg'},
+                        savefig={'fname': figfile, 'format': figfmt},
                         show=False, ylabel=False, compounded=compounded)
-    tpl = tpl.replace('{{returns_dist}}', figfile.getvalue().decode())
+    tpl = tpl.replace('{{returns_dist}}', _embed_figure(figfile, figfmt))
 
     tpl = _regex.sub(r'\{\{(.*?)\}\}', '', tpl)
     tpl = tpl.replace('white-space:pre;', '')
 
     if output is None:
         # _open_html(tpl)
-        _download_html(tpl, 'quantstats-tearsheet.html')
+        _download_html(tpl, download_filename)
         return
 
     with open(output, 'w', encoding='utf-8') as f:
@@ -208,7 +222,8 @@ def html(returns, benchmark=None, rf=0.,
 
 
 def full(returns, benchmark=None, rf=0., grayscale=False,
-         figsize=(8, 5), display=True, compounded=True):
+         figsize=(8, 5), display=True, compounded=True,
+         trading_year_days=252):
 
     dd = _stats.to_drawdown_series(returns)
     dd_info = _stats.drawdown_details(dd).sort_values(
@@ -246,11 +261,13 @@ def full(returns, benchmark=None, rf=0., grayscale=False,
         print('[Strategy Visualization]\nvia Matplotlib')
 
     plots(returns=returns, benchmark=benchmark,
-          grayscale=grayscale, figsize=figsize, mode='full')
+          grayscale=grayscale, figsize=figsize, mode='full',
+          trading_year_days=trading_year_days)
 
 
 def basic(returns, benchmark=None, rf=0., grayscale=False,
-          figsize=(8, 5), display=True, compounded=True):
+          figsize=(8, 5), display=True, compounded=True,
+          trading_year_days=252):
 
     if _utils._in_notebook():
         iDisplay(iHTML('<h4>Performance Metrics</h4>'))
@@ -268,11 +285,15 @@ def basic(returns, benchmark=None, rf=0., grayscale=False,
         print('[Strategy Visualization]\nvia Matplotlib')
 
     plots(returns=returns, benchmark=benchmark,
-          grayscale=grayscale, figsize=figsize, mode='basic')
+          grayscale=grayscale, figsize=figsize, mode='basic',
+          trading_year_days=trading_year_days)
 
 
 def metrics(returns, benchmark=None, rf=0., display=True,
-            mode='basic', sep=False, compounded=True, **kwargs):
+            mode='basic', sep=False, compounded=True,
+            trading_year_days=252, **kwargs):
+
+    win_year, _ = _get_trading_periods(trading_year_days)
 
     if isinstance(returns, _pd.DataFrame) and len(returns.columns) > 1:
         raise ValueError("`returns` must be a pandas Series, "
@@ -284,7 +305,14 @@ def metrics(returns, benchmark=None, rf=0., display=True,
                              "but a multi-column DataFrame was passed")
 
     blank = ['']
+
+    if isinstance(returns, _pd.DataFrame):
+        if len(returns.columns) > 1:
+            raise ValueError("`returns` needs to be a Pandas Series. DataFrame was passed")
+        returns = returns[returns.columns[0]]
+
     df = _pd.DataFrame({"returns": _utils._prepare_returns(returns, rf)})
+
     if benchmark is not None:
         blank = ['', '']
         df["benchmark"] = _utils._prepare_benchmark(
@@ -323,15 +351,21 @@ def metrics(returns, benchmark=None, rf=0., display=True,
         metrics['Total Return %'] = (df.sum() * pct).map('{:,.2f}'.format)
 
     metrics['CAGR%%'] = _stats.cagr(df, rf, compounded) * pct
-    metrics['Sharpe'] = _stats.sharpe(df, rf)
-    metrics['Sortino'] = _stats.sortino(df, rf)
+
+    metrics['~~~~~~~~~~~~~~'] = blank
+
+    metrics['Sharpe'] = _stats.sharpe(df, rf, win_year, True, win_year)
+    metrics['Sortino'] = _stats.sortino(df, rf, win_year, True, win_year)
+    metrics['Sortino/√2'] = metrics['Sortino'] / _sqrt(2)
+
+    metrics['~~~~~~~~'] = blank
     metrics['Max Drawdown %'] = blank
     metrics['Longest DD Days'] = blank
 
     if mode.lower() == 'full':
-        ret_vol = _stats.volatility(df['returns']) * pct
+        ret_vol = _stats.volatility(df['returns'], win_year, True, win_year) * pct
         if "benchmark" in df:
-            bench_vol = _stats.volatility(df['benchmark']) * pct
+            bench_vol = _stats.volatility(df['benchmark'], win_year, True, win_year) * pct
             metrics['Volatility (ann.) %'] = [ret_vol, bench_vol]
             metrics['R^2'] = _stats.r_squared(df['returns'], df['benchmark'])
         else:
@@ -355,6 +389,14 @@ def metrics(returns, benchmark=None, rf=0., display=True,
         metrics['Expected Shortfall (cVaR) %'] = -abs(_stats.cvar(df) * pct)
 
     metrics['~~~~~~'] = blank
+
+    metrics['Gain/Pain Ratio'] = _stats.gain_to_pain_ratio(df, rf)
+    metrics['Gain/Pain (1M)'] = _stats.gain_to_pain_ratio(df, rf, "M")
+    # if mode.lower() == 'full':
+    #     metrics['GPR (3M)'] = _stats.gain_to_pain_ratio(df, rf, "Q")
+    #     metrics['GPR (6M)'] = _stats.gain_to_pain_ratio(df, rf, "2Q")
+    #     metrics['GPR (1Y)'] = _stats.gain_to_pain_ratio(df, rf, "A")
+    metrics['~~~~~~~'] = blank
 
     metrics['Payoff Ratio'] = _stats.payoff_ratio(df)
     metrics['Profit Factor'] = _stats.profit_factor(df)
@@ -425,7 +467,7 @@ def metrics(returns, benchmark=None, rf=0., display=True,
 
         if "benchmark" in df:
             metrics['~~~~~~~'] = blank
-            greeks = _stats.greeks(df['returns'], df['benchmark'])
+            greeks = _stats.greeks(df['returns'], df['benchmark'], win_year)
             metrics['Beta'] = [str(round(greeks['beta'], 2)), '-']
             metrics['Alpha'] = [str(round(greeks['alpha'], 2)), '-']
 
@@ -477,7 +519,10 @@ def metrics(returns, benchmark=None, rf=0., display=True,
 
 
 def plots(returns, benchmark=None, grayscale=False,
-          figsize=(8, 5), mode='basic', compounded=True):
+          figsize=(8, 5), mode='basic', compounded=True,
+          trading_year_days=252):
+
+    win_year, win_half_year = _get_trading_periods(trading_year_days)
 
     if mode.lower() != 'full':
         _plots.snapshot(returns, grayscale=grayscale,
@@ -520,20 +565,22 @@ def plots(returns, benchmark=None, grayscale=False,
 
     if benchmark is not None:
         _plots.rolling_beta(returns, benchmark, grayscale=grayscale,
+                            window1=win_year, window2=win_half_year,
                             figsize=(figsize[0], figsize[0]*.3),
                             show=True, ylabel=False)
 
     _plots.rolling_volatility(
         returns, benchmark, grayscale=grayscale,
-        figsize=(figsize[0], figsize[0]*.3), show=True, ylabel=False)
+        figsize=(figsize[0], figsize[0]*.3), show=True, ylabel=False,
+        period=win_half_year)
 
     _plots.rolling_sharpe(returns, grayscale=grayscale,
                           figsize=(figsize[0], figsize[0]*.3),
-                          show=True, ylabel=False)
+                          show=True, ylabel=False, period=win_half_year)
 
     _plots.rolling_sortino(returns, grayscale=grayscale,
                            figsize=(figsize[0], figsize[0]*.3),
-                           show=True, ylabel=False)
+                           show=True, ylabel=False, period=win_half_year)
 
     _plots.drawdowns_periods(returns, grayscale=grayscale,
                              figsize=(figsize[0], figsize[0]*.5),
@@ -572,10 +619,10 @@ def _calc_dd(df, display=True):
             'Max Drawdown %': ret_dd.sort_values(
                 by='max drawdown', ascending=True
             )['max drawdown'].values[0] / pct,
-            'Longest DD Days': str(round(ret_dd.sort_values(
+            'Longest DD Days': str(_np.round(ret_dd.sort_values(
                 by='days', ascending=False)['days'].values[0])),
             'Avg. Drawdown %': ret_dd['max drawdown'].mean() / pct,
-            'Avg. Drawdown Days': str(round(ret_dd['days'].mean()))
+            'Avg. Drawdown Days': str(_np.round(ret_dd['days'].mean()))
         }
     }
     if "benchmark" in df and (dd_info.columns, _pd.MultiIndex):
@@ -584,10 +631,10 @@ def _calc_dd(df, display=True):
             'Max Drawdown %': bench_dd.sort_values(
                 by='max drawdown', ascending=True
             )['max drawdown'].values[0] / pct,
-            'Longest DD Days': str(round(bench_dd.sort_values(
+            'Longest DD Days': str(_np.round(bench_dd.sort_values(
                 by='days', ascending=False)['days'].values[0])),
             'Avg. Drawdown %': bench_dd['max drawdown'].mean() / pct,
-            'Avg. Drawdown Days': str(round(bench_dd['days'].mean()))
+            'Avg. Drawdown Days': str(_np.round(bench_dd['days'].mean()))
         }
 
     dd_stats = _pd.DataFrame(dd_stats).T
@@ -632,3 +679,11 @@ def _open_html(html):
         ' +', ' ', html.replace('\n', '')))
     if _utils._in_notebook():
         iDisplay(iHTML(jscode))
+
+
+def _embed_figure(figfile, figfmt):
+    figbytes = figfile.getvalue()
+    if figfmt == 'svg':
+        return figbytes.decode()
+    data_uri = _b64encode(figbytes).decode()
+    return '<img src="data:image/{};base64,{}" />'.format(figfmt, data_uri)

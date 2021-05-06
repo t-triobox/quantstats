@@ -173,12 +173,15 @@ def to_excess_returns(returns, rf, nperiods=None):
     Returns:
         * excess_returns (Series, DataFrame): Returns - rf
     """
+    if isinstance(rf, int):
+        rf = float(rf)
+
     if not isinstance(rf, float):
         rf = rf[rf.index.isin(returns.index)]
 
     if nperiods is not None:
         # deannualize
-        rf = _np.power(1 + returns, 1. / nperiods) - 1.
+        rf = _np.power(1 + rf, 1. / nperiods) - 1.
 
     return returns - rf
 
@@ -209,7 +212,7 @@ def _prepare_returns(data, rf=0., nperiods=None):
 
     if isinstance(data, _pd.DataFrame):
         for col in data.columns:
-            if data[col].dropna().min() >= 0 or data[col].dropna().max() > 1:
+            if data[col].dropna().min() >= 0 and data[col].dropna().max() > 1:
                 data[col] = data[col].pct_change()
     elif data.min() >= 0 and data.max() > 1:
         data = data.pct_change()
@@ -303,6 +306,25 @@ def _count_consecutive(data):
 def _score_str(val):
     """ Returns + sign for positive values (used in plots) """
     return ("" if "-" in val else "+") + str(val)
+
+
+def make_index(ticker_weights, rebalance=None, period="max"):
+    """ Makes an index out of the given tickers and weights. """
+    # Declare a returns variable
+    index = None
+
+    # Iterate over weights
+    for ticker, ticker_weight in ticker_weights.items():
+        # Download the returns for this ticker, e.g. GOOG
+        ticker_returns = download_returns(ticker, period)
+        if index is None:
+            # Set the returns to this return series if it's empty
+            index = ticker_returns
+        else:
+            # Otherwise, add weighted return
+            index += ticker_returns * ticker_weight
+    # Return total index
+    return index
 
 
 def make_portfolio(returns, start_balance=1e5,

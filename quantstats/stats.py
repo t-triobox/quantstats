@@ -20,7 +20,7 @@
 
 import pandas as _pd
 import numpy as _np
-from math import ceil as _ceil
+from math import ceil as _ceil, sqrt as _sqrt
 from scipy.stats import (
     norm as _norm, linregress as _linregress
 )
@@ -92,7 +92,7 @@ def consecutive_wins(returns, aggregate=None, compounded=True):
     """ returns the maximum consecutive wins by day/month/week/quarter/year """
     returns = _utils._prepare_returns(returns)
     returns = _utils.aggregate_returns(returns, aggregate, compounded) > 0
-    return _utils.count_consecutive(returns).max()
+    return _utils._count_consecutive(returns).max()
 
 
 def consecutive_losses(returns, aggregate=None, compounded=True):
@@ -102,7 +102,7 @@ def consecutive_losses(returns, aggregate=None, compounded=True):
     """
     returns = _utils._prepare_returns(returns)
     returns = _utils.aggregate_returns(returns, aggregate, compounded) < 0
-    return _utils.count_consecutive(returns).max()
+    return _utils._count_consecutive(returns).max()
 
 
 def exposure(returns):
@@ -176,26 +176,26 @@ def avg_loss(returns, aggregate=None, compounded=True):
     return returns[returns < 0].dropna().mean()
 
 
-def volatility(returns, periods=252, annualize=True):
+def volatility(returns, periods=252, annualize=True, trading_year_days=252):
     """ calculates the volatility of returns for a period """
     std = _utils._prepare_returns(returns).std()
     if annualize:
-        return std * _np.sqrt(periods)
+        return std * _np.sqrt(trading_year_days)
 
     return std
 
 
-def implied_volatility(returns, periods=252, annualize=True):
+def implied_volatility(returns, periods=252, annualize=True, trading_year_days=252):
     """ calculates the implied volatility of returns for a period """
     logret = _utils.log_returns(returns)
     if annualize:
-        return logret.rolling(periods).std() * _np.sqrt(periods)
+        return logret.rolling(periods).std() * _np.sqrt(trading_year_days)
     return logret.std()
 
 
 # ======= METRICS =======
 
-def sharpe(returns, rf=0., periods=252, annualize=True):
+def sharpe(returns, rf=0., periods=252, annualize=True, trading_year_days=252):
     """
     calculates the sharpe ratio of access returns
 
@@ -205,7 +205,7 @@ def sharpe(returns, rf=0., periods=252, annualize=True):
     Args:
         * returns (Series, DataFrame): Input return series
         * rf (float): Risk-free rate expressed as a yearly (annualized) return
-        * periods (int): Frequency of returns (252 for daily, 12 for monthly)
+        * periods (int): Freq. of returns (252/365 for daily, 12 for monthly)
         * annualize: return annualize sharpe?
     """
 
@@ -216,12 +216,13 @@ def sharpe(returns, rf=0., periods=252, annualize=True):
     res = returns.mean() / returns.std()
 
     if annualize:
-        return res * _np.sqrt(1 if periods is None else periods)
+        return res * _np.sqrt(
+            1 if trading_year_days is None else trading_year_days)
 
     return res
 
 
-def sortino(returns, rf=0, periods=252, annualize=True):
+def sortino(returns, rf=0, periods=252, annualize=True, trading_year_days=252):
     """
     calculates the sortino ratio of access returns
 
@@ -241,9 +242,32 @@ def sortino(returns, rf=0, periods=252, annualize=True):
     res = returns.mean() / _np.sqrt(downside)
 
     if annualize:
-        return res * _np.sqrt(1 if periods is None else periods)
+        return res * _np.sqrt(
+            1 if trading_year_days is None else trading_year_days)
 
     return res
+
+
+def adjusted_sortino(returns, rf=0, periods=252, annualize=True, trading_year_days=252):
+    """
+    Jack Schwager's version of the Sortino ratio allows for
+    direct comparisons to the Sharpe. See here for more info:
+    https://archive.is/wip/2rwFW
+    """
+    data = sortino(
+        returns, rf=0, periods=periods, annualize=annualize,
+        trading_year_days=trading_year_days)
+    return data / _sqrt(2)
+
+
+def gain_to_pain_ratio(returns, rf=0, resolution="D"):
+    """
+    Jack Schwager's GPR. See here for more info:
+    https://archive.is/wip/2rwFW
+    """
+    returns = _utils._prepare_returns(returns, rf).resample(resolution).sum()
+    downside = abs(returns[returns < 0].sum())
+    return returns.sum() / downside
 
 
 def cagr(returns, rf=0., compounded=True):
@@ -425,11 +449,6 @@ def profit_factor(returns):
     """ measures the profit ratio (wins/loss) """
     returns = _utils._prepare_returns(returns)
     return abs(returns[returns >= 0].sum() / returns[returns < 0].sum())
-
-
-def gain_to_pain_ratio(returns):
-    """ shorthand for profit_factor() """
-    return profit_factor(returns)
 
 
 def cpc_index(returns):
@@ -631,6 +650,7 @@ def rolling_greeks(returns, benchmark, periods=252):
         "returns": _utils._prepare_returns(returns),
         "benchmark": _utils._prepare_benchmark(benchmark, returns.index)
     })
+    df = df.fillna(0)
     corr = df.rolling(int(periods)).corr().unstack()['returns']['benchmark']
     std = df.rolling(int(periods)).std()
     beta = corr * std['returns'] / std['benchmark']

@@ -33,7 +33,10 @@ from matplotlib.ticker import (
 import pandas as _pd
 import numpy as _np
 import seaborn as _sns
-from .. import stats as _stats
+from .. import (
+    stats as _stats, utils as _utils,
+)
+
 
 _sns.set(font_scale=1.1, rc={
     'figure.figsize': (10, 6),
@@ -114,9 +117,15 @@ def plot_returns_bars(returns, benchmark=None,
     fig.set_facecolor('white')
     ax.set_facecolor('white')
 
-    ax.set_xticklabels(df.index.year)
+    try:
+        ax.set_xticklabels(df.index.year)
+        years = sorted(list(set(df.index.year)))
+    except AttributeError:
+        ax.set_xticklabels(df.index)
+        years = sorted(list(set(df.index)))
+
     # ax.fmt_xdata = _mdates.DateFormatter('%Y-%m-%d')
-    years = sorted(list(set(df.index.year)))
+    # years = sorted(list(set(df.index.year)))
     if len(years) > 10:
         mod = int(len(years)/10)
         _plt.xticks(_np.arange(len(years)), [
@@ -337,12 +346,14 @@ def plot_histogram(returns, resample="M", bins=20,
     ax.axvline(returns.mean(), ls="--", lw=1.5,
                color=colors[2], zorder=2, label="Average")
 
-    _sns.distplot(returns, bins=bins,
-                  axlabel="", color=colors[0], hist_kws=dict(alpha=1),
+    _sns.histplot(returns, bins=bins,
+                  color=colors[0],
+                  alpha=1,
                   kde=kde,
-                  # , label="Kernel Estimate"
-                  kde_kws=dict(color='black', alpha=.7),
+                  stat="density",
                   ax=ax)
+    _sns.kdeplot(returns, color='black', linewidth=1.5)
+
 
     ax.xaxis.set_major_formatter(_plt.FuncFormatter(
         lambda x, loc: "{:,}%".format(int(x*100))))
